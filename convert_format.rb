@@ -2,23 +2,48 @@ require 'roo'
 require 'roo-xls'
 require 'write_xlsx'
 require 'byebug'
+require 'date'
 
-# Read the structure of Spreadsheet A
-def analyze_structure(spreadsheet_a_path)
+# Read the structure and data of Spreadsheet A
+def read_spreadsheet_a(spreadsheet_a_path)
   spreadsheet_a = Roo::Spreadsheet.open(spreadsheet_a_path)
-  sheet = spreadsheet_a.sheet(1)
-  # Extract column headers (assume headers are in the first row)
-  column_names_a = sheet.row(2)
-  column_names_a
+  data = {}
+  column_names_a = nil
+
+  # Iterate through each sheet in the workbook
+  spreadsheet_a.sheets.each do |sheet_name|
+    next if sheet_name == "Summary"  # Skip the first sheet
+    sheet = spreadsheet_a.sheet(sheet_name)
+
+    # Extract column headers (assume headers are in the second row of each sheet)
+    column_names_a ||= sheet.row(2)  # Assign only once from the first sheet
+
+    ean_index = column_names_a.index("EAN")
+
+    # Iterate through the rows of the current sheet and store additional data
+    (3..sheet.last_row).each do |row_index|
+      ean_value = sheet.cell(row_index, ean_index + 1)  # +1 because Roo is 1-based
+
+      next if ean_value.nil?  # Skip if EAN/ISBN is missing
+
+      data[ean_value] ||= {}  # Initialize hash for this EAN/ISBN
+
+      column_names_a.each_with_index do |col_name, col_index|
+        next if col_index == ean_index  # Skip the EAN column itself
+        data[ean_value][col_name] = sheet.cell(row_index, col_index + 1)
+      end
+    end
+  end
+
+  { column_names_a: column_names_a, data: data }
 end
 
 # Convert Spreadsheet B to match the structure of Spreadsheet A
-def convert_format(spreadsheet_b_path, column_names_a, output_spreadsheet_path)
+def convert_format(spreadsheet_b_path, spreadsheet_a_data, output_spreadsheet_path)
   spreadsheet_b = Roo::Spreadsheet.open(spreadsheet_b_path, extension: :xls)
   sheet_b = spreadsheet_b.sheet(0)
-  
-  # Extract column headers from Spreadsheet B
-  column_names_b = sheet_b.row(1)
+  column_names_a = spreadsheet_a_data[:column_names_a]
+  additional_item_data = spreadsheet_a_data[:data]
   
   # Create new spreadsheet C with the same format as Spreadsheet A
   workbook = WriteXLSX.new(output_spreadsheet_path)
@@ -29,6 +54,7 @@ def convert_format(spreadsheet_b_path, column_names_a, output_spreadsheet_path)
     worksheet.write(0, index, col_name)
   end
 
+  # Mapping of Spreadsheet B columns to Spreadsheet A columns
   column_names_mapping = {
     "ISBN" => "EAN",
     "Qty" => "Ord Qty",
@@ -39,45 +65,55 @@ def convert_format(spreadsheet_b_path, column_names_a, output_spreadsheet_path)
     "Retail" => "Retail Price"
   }
 
-  column_mapping = {}
-  column_names_mapping.each do |col_b_name, col_a_name|
-    col_b_index = column_names_b.index(col_b_name)  # Find the index of the column in B
-    col_a_index = column_names_a.index(col_a_name)  # Find the index of the column in A
-    column_mapping[col_b_index] = col_a_index if col_b_index && col_a_index  # Store only if both columns exist
+  # Get the indices of the columns in Spreadsheet B for reference
+  col_b_indices = {}
+  sheet_b.row(1).each_with_index do |col_name, index|
+    col_b_indices[col_name] = index
   end
 
-  # Write data from Spreadsheet B to the new spreadsheet, in the same format as Spreadsheet A
+  counter_found = 0
+  counter_not_found = 0
+
+  # Write data from Spreadsheet B to the new spreadsheet
   (2..sheet_b.last_row).each do |row_index|
-    column_mapping.each do |col_b_index, col_a_index|
-      if col_b_index && col_a_index
-        # If it's a date, convert to M/D/Y format
-        # byebug
-        if column_names_a[col_a_index] == "Pub Date"
-          date = Date.parse(sheet_b.cell(row_index, col_b_index + 1))
-          worksheet.write(row_index - 1, col_a_index, date.strftime("%-m/%-d/%Y"))  # sheet_b.cell is 1-based
-          next
+    ean_value = sheet_b.cell(row_index, col_b_indices["ISBN"] + 1)
+    
+    # Write mapped columns
+    column_names_mapping.each do |col_b_name, col_a_name|
+      col_a_index = column_names_a.index(col_a_name)
+      if col_a_index
+        # Handle specific logic for Pub Date and Disc
+        if col_a_name == "Pub Date"
+          date = Date.parse(sheet_b.cell(row_index, col_b_indices[col_b_name] + 1))
+          worksheet.write(row_index - 1, col_a_index, date.strftime("%-m/%-d/%Y"))
+        elsif col_a_name == "Disc"
+          discount = sheet_b.cell(row_index, col_b_indices[col_b_name] + 1)
+          worksheet.write(row_index - 1, col_a_index, discount == 40 ? "REG" : discount)
+        else
+          worksheet.write(row_index - 1, col_a_index, sheet_b.cell(row_index, col_b_indices[col_b_name] + 1))
         end
-        # if discount is 40, input the string "REG"
-        if column_names_a[col_a_index] == "Disc"
-          discount = sheet_b.cell(row_index, col_b_index + 1)
-          if discount == 40
-            worksheet.write(row_index - 1, col_a_index, "REG")
-          else
-            worksheet.write(row_index - 1, col_a_index, discount)
-          end
-          next
-        end
-        # Write the cell value from Spreadsheet B to the correct column in Spreadsheet A
-        worksheet.write(row_index - 1, col_a_index, sheet_b.cell(row_index, col_b_index + 1))  # sheet_b.cell is 1-based
-      else
-        # Leave blank if column mapping does not exist
-        worksheet.write(row_index - 1, col_a_index, "")
       end
     end
+
+    allowed_keys_to_write = ["Desire Status", "BISAC Description", "Section Description", "Prod Type", "Cost", "Total Cost"]
+
+    # Append additional item data if EAN/ISBN exists
+    if additional_item_data[ean_value]
+      counter_found += 1
+      additional_item_data[ean_value].each do |key, value|
+        if allowed_keys_to_write.include?(key)
+          col_index = column_names_a.index(key)  # Find the index in the A format
+          worksheet.write(row_index - 1, col_index, value) if col_index  # Only write if column exists
+        end
+      end
+    else
+      counter_not_found += 1
+      puts "Additional data not found for EAN/ISBN: #{ean_value}"
+    end
   end
-  
-  # Write data from Spreadsheet B to the new spreadsheet, in the same format as Spreadsheet A
-  # For any non-matching columns, leave the cell blank
+
+  puts "There are #{counter_found} items with additional data found in SpreadsheetA."
+  puts "There are #{counter_not_found} items with additional data not found in SpreadsheetA."
 
   # Close and save the new spreadsheet
   workbook.close
@@ -88,10 +124,10 @@ spreadsheet_a_path = 'spreadsheets/SpreadsheetA.xlsx'
 spreadsheet_b_path = 'spreadsheets/SpreadsheetB.xls'
 output_spreadsheet_path = 'spreadsheets/SpreadsheetC.xlsx'
 
-# Analyze Spreadsheet A's structure
-column_names_a = analyze_structure(spreadsheet_a_path)
+# Read Spreadsheet A's structure and data
+spreadsheet_a_data = read_spreadsheet_a(spreadsheet_a_path)
 
 # Convert Spreadsheet B to match Spreadsheet A's format
-convert_format(spreadsheet_b_path, column_names_a, output_spreadsheet_path)
+convert_format(spreadsheet_b_path, spreadsheet_a_data, output_spreadsheet_path)
 
 puts "Spreadsheet B has been converted to match Spreadsheet A's format in #{output_spreadsheet_path}"
