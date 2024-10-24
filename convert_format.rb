@@ -137,3 +137,13 @@ spreadsheet_a_data = read_spreadsheet_a(spreadsheet_a_path)
 convert_format(spreadsheet_b_path, spreadsheet_a_data, output_spreadsheet_path)
 
 puts "Spreadsheet B has been converted to match Spreadsheet A's format in #{output_spreadsheet_path}"
+
+# To run this script, you need to have the following gems installed:
+# roo, roo-xls, write_xlsx
+# You can install them using the following commands:
+# gem install roo
+# gem install roo-xls
+# gem install write_xlsx
+
+# Run the script using the following command:
+# ruby convert_format.rb
