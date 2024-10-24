@@ -4,7 +4,7 @@ require 'write_xlsx'
 require 'byebug'
 require 'date'
 
-# Created for Lovestruck Books & Cafe, a book-buying client preparing to open their store in late 2024.
+# Created for a book-buying client preparing to open their store in late 2024.
 # The client uses Bookmanager to select books for their store, including via Ingram.
 # However, Ingram requires opening orders to be in their ROSI format in order to apply special discounts.
 # This formula converts a spreadsheet of Ingram selections downloaded from Bookmanager to match the format of Ingram's ROSI spreadsheet,
