@@ -4,7 +4,11 @@ require 'write_xlsx'
 require 'byebug'
 require 'date'
 
-# Read the structure and data of Spreadsheet A
+# Ingram requires opening orders to be in their ROSI format in order to apply special discounts.
+# This formula converts a spreadsheet of Ingram selections downloaded from Bookmanager to match the format of Ingram's ROSI spreadsheet,
+# and cross-checks the ROSI for Ingram-platform-specific information like "Desire Status" and "Prod Type."
+
+# Read the structure and data of Spreadsheet A, which is the ROSI format
 def read_spreadsheet_a(spreadsheet_a_path)
   spreadsheet_a = Roo::Spreadsheet.open(spreadsheet_a_path)
   data = {}
@@ -38,7 +42,7 @@ def read_spreadsheet_a(spreadsheet_a_path)
   { column_names_a: column_names_a, data: data }
 end
 
-# Convert Spreadsheet B to match the structure of Spreadsheet A
+# Convert Spreadsheet B, in the Bookmanager format, to match the structure of Spreadsheet A
 def convert_format(spreadsheet_b_path, spreadsheet_a_data, output_spreadsheet_path)
   spreadsheet_b = Roo::Spreadsheet.open(spreadsheet_b_path, extension: :xls)
   sheet_b = spreadsheet_b.sheet(0)
